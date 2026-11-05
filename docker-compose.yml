@@ -13,8 +13,9 @@ services:
       MYWANIP_ADMIN_TOKEN: ${MYWANIP_ADMIN_TOKEN:-}
       MYWANIP_ALLOWED_HOSTS: ${MYWANIP_ALLOWED_HOSTS:-}
     ports:
-      # This machine only. Use "8787:8787" to open it to your network.
-      - "127.0.0.1:8787:8787"
+      # This machine only by default. Set MYWANIP_BIND in .env to open it up:
+      # a LAN IP such as 192.168.1.10 (recommended) or 0.0.0.0 for every interface.
+      - "${MYWANIP_BIND:-127.0.0.1}:8787:8787"
     volumes:
       - mywanip-data:/data
     read_only: true

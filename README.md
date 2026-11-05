@@ -84,6 +84,19 @@ is not plain HTTP(S), for example a game server: Cloudflare's proxy does not car
 A multi-arch image (amd64 and arm64, so a Pi works) is published as
 `ghcr.io/frizzy/mywanip`.
 
+### Guided setup
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/frizzy/mywanip/main/install-docker.sh | bash
+```
+
+It asks where to install (default `./mywanip`), which address to listen on, and, if you
+like, your Cloudflare hostname, zone and API token. Then it starts the service, adds the
+DNS record, and prints the admin token. Re-running it keeps your `.env`, token and data.
+Read the script first if you like: it is [`install-docker.sh`](install-docker.sh).
+
+### By hand
+
 ```bash
 docker compose up -d
 docker compose exec mywanip mywanip --show-token   # the generated admin token
@@ -91,9 +104,9 @@ docker compose exec mywanip mywanip --show-token   # the generated admin token
 
 The UI is at <http://127.0.0.1:8787>. State lives in the `mywanip-data` volume. To set the
 token yourself, put `MYWANIP_ADMIN_TOKEN=$(openssl rand -hex 32)` in a `.env` next to the
-compose file. To open it to your network, change the port mapping to `"8787:8787"`
-(and set a token of 32+ characters). Update with
-`docker compose pull && docker compose up -d`.
+compose file. To open it to your network, set `MYWANIP_BIND` in that `.env` to a LAN IP
+such as `192.168.1.10` (or `0.0.0.0` for every interface); a token of 32+ characters is
+then required. Update with `docker compose pull && docker compose up -d`.
 
 Without Compose:
 
