@@ -1,0 +1,42 @@
+# Template: deploy/install.sh fills in @USER@ and @APP_DIR@.
+[Unit]
+Description=mywanip: WAN IP resolver and announcer
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@APP_DIR@
+# Admin token, bind address and port; root-owned, mode 600.
+EnvironmentFile=/etc/mywanip.env
+# SQLite lives here; it is the only path the service may write to.
+Environment=MYWANIP_DATA=/var/lib/mywanip
+StateDirectory=mywanip
+StateDirectoryMode=0700
+ExecStart=@APP_DIR@/.venv/bin/mywanip
+Restart=on-failure
+RestartSec=5
+
+# The service only needs to read its own code, write its state and use the network.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+# Always-on service:   docker compose up -d
+# The admin token is optional here: if MYWANIP_ADMIN_TOKEN is unset, one is
+# generated and stored in the data volume (see `docker compose logs`, or
+# `docker compose exec mywanip mywanip --show-token`).
+services:
+  mywanip:
+    image: ghcr.io/frizzy/mywanip:latest
+    build: .
+    restart: unless-stopped
+    environment:
+      MYWANIP_HOST: 0.0.0.0 # inside the container; the published port below decides who can reach it
+      MYWANIP_PORT: 8787
+      MYWANIP_ADMIN_TOKEN: ${MYWANIP_ADMIN_TOKEN:-}
+      MYWANIP_ALLOWED_HOSTS: ${MYWANIP_ALLOWED_HOSTS:-}
+    ports:
+      # This machine only. Use "8787:8787" to open it to your network.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - mywanip-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mywanip-data:

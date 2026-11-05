@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mywanip</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1f24; --muted:#6a737d; --line:#d8dee4; --accent:#0969da; --bad:#cf222e; --ok:#1a7f37; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --line:#30363d; --accent:#4493f8; --bad:#f85149; --ok:#3fb950; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:900px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:14px; font-weight:600; color:var(--muted); margin:0 0 4px; letter-spacing:.04em; text-transform:uppercase; }
+  h2 { font-size:16px; margin:32px 0 8px; }
+  .ip { font:600 40px/1.1 ui-monospace, monospace; }
+  .muted { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin:8px 0; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); font-size:14px; vertical-align:top; word-break:break-word; }
+  th { color:var(--muted); font-weight:500; }
+  form { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  input, textarea, button { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+  input { flex:1 1 150px; min-width:0; }
+  textarea { width:100%; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #login { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Current WAN IP</h1>
+  <div class="ip" id="ip">…</div>
+  <div class="muted" id="meta"></div>
+
+  <form id="login">
+    <input id="token" type="password" placeholder="Admin token" autocomplete="current-password">
+    <button class="primary">Unlock</button>
+  </form>
+  <div id="admin" hidden>
+    <p><button id="check">Check now</button> <button id="logout">Lock</button> <span class="muted" id="msg"></span></p>
+
+    <h2>DNS records</h2>
+    <table><thead><tr><th>Hostname</th><th>Zone</th><th>Token</th><th>Status</th><th></th></tr></thead><tbody id="dns"></tbody></table>
+    <form id="dns-form">
+      <input name="hostname" placeholder="home.example.com" required>
+      <input name="zone" placeholder="example.com" required>
+      <input name="secret" type="password" placeholder="Cloudflare API token" required autocomplete="off">
+      <button class="primary">Add (Cloudflare)</button>
+    </form>
+
+    <h2>Webhooks</h2>
+    <table><thead><tr><th>URL</th><th>Signing secret</th><th>Status</th><th></th></tr></thead><tbody id="hooks"></tbody></table>
+    <form id="hook-form">
+      <input name="url" type="url" placeholder="http://minecraft.lan:9000/hooks/wan-ip" required>
+      <input name="secret" type="password" placeholder="Signing secret (optional)" autocomplete="off">
+      <button class="primary">Add</button>
+    </form>
+
+    <h2>Settings</h2>
+    <form id="settings-form">
+      <input name="poll_interval" type="number" min="30" title="Poll interval (seconds)" required>
+      <textarea name="sources" rows="3" title="IP echo endpoints, one per line"></textarea>
+      <button class="primary">Save</button>
+    </form>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const store = { get: () => { try { return localStorage.getItem('token') } catch { return null } },
+                set: (v) => { try { v ? localStorage.setItem('token', v) : localStorage.removeItem('token') } catch {} } };
+
+// Build DOM with textContent only: nothing from the API is ever parsed as HTML.
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  Object.assign(el, attrs);
+  el.append(...kids);
+  return el;
+}
+
+async function api(method, path, body) {
+  const r = await fetch('/api' + path, {
+    method,
+    headers: { 'Authorization': 'Bearer ' + store.get(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401) { lock(); throw new Error('Wrong admin token'); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail || r.status));
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+const say = (t, bad) => { $('msg').textContent = t || ''; $('msg').className = 'muted ' + (bad ? 'bad' : ''); };
+const run = (fn) => async (e) => { e?.preventDefault?.(); say(''); try { await fn(e); await load(); } catch (err) { say(err.message, true); } };
+const status = (s) => h('span', { className: s === 'ok' ? 'ok' : s ? 'bad' : 'muted', textContent: s || 'pending' });
+
+function row(item, cols, actions) {
+  return h('tr', {}, ...cols.map((c) => h('td', {}, c)), h('td', {}, ...actions));
+}
+const btn = (label, fn) => h('button', { textContent: label, onclick: run(fn) });
+
+function showIp(d) {
+  $('ip').textContent = d.ip || 'unknown';
+  $('meta').textContent = d.ip ? `changed ${d.changed_at}${d.previous ? ' (was ' + d.previous + ')' : ''} · checked ${d.checked_at}` : 'waiting for first check';
+}
+
+async function load() {
+  const [dns, hooks, s] = await Promise.all([api('GET', '/dns-records'), api('GET', '/webhooks'), api('GET', '/settings')]);
+  $('dns').replaceChildren(...dns.map((r) => row(r,
+    [r.hostname + (r.enabled ? '' : ' (off)'), r.zone, r.secret_hint, status(r.last_status)],
+    [btn('Sync', () => api('POST', `/dns-records/${r.id}/sync`)),
+     btn(r.enabled ? 'Disable' : 'Enable', () => api('PATCH', `/dns-records/${r.id}`, { enabled: !r.enabled })),
+     btn('New token', async () => { const v = prompt('New API token'); if (v) await api('PATCH', `/dns-records/${r.id}`, { secret: v }); }),
+     btn('Delete', async () => { if (confirm('Delete ' + r.hostname + '?')) await api('DELETE', `/dns-records/${r.id}`); })])));
+  $('hooks').replaceChildren(...hooks.map((r) => row(r,
+    [r.url + (r.enabled ? '' : ' (off)'), r.secret_hint || '—', status(r.last_status)],
+    [btn('Test', () => api('POST', `/webhooks/${r.id}/test`)),
+     btn(r.enabled ? 'Disable' : 'Enable', () => api('PATCH', `/webhooks/${r.id}`, { enabled: !r.enabled })),
+     btn('New secret', async () => { const v = prompt('New signing secret'); if (v) await api('PATCH', `/webhooks/${r.id}`, { secret: v }); }),
+     btn('Delete', async () => { if (confirm('Delete ' + r.url + '?')) await api('DELETE', `/webhooks/${r.id}`); })])));
+  const f = $('settings-form');
+  if (document.activeElement.form !== f) { f.poll_interval.value = s.poll_interval; f.sources.value = s.sources.join('\n'); }
+}
+
+const formData = (form) => Object.fromEntries(new FormData(form));
+$('dns-form').onsubmit = run(async (e) => { await api('POST', '/dns-records', formData(e.target)); e.target.reset(); });
+$('hook-form').onsubmit = run(async (e) => { await api('POST', '/webhooks', formData(e.target)); e.target.reset(); });
+$('settings-form').onsubmit = run((e) => {
+  const d = formData(e.target);
+  return api('PATCH', '/settings', { poll_interval: +d.poll_interval, sources: d.sources.split('\n').map((x) => x.trim()).filter(Boolean) });
+});
+$('check').onclick = run(async () => showIp(await api('POST', '/check')));
+
+function unlock() { $('login').style.display = 'none'; $('admin').hidden = false; run(() => {})(); }
+function lock() { store.set(null); $('login').style.display = 'flex'; $('admin').hidden = true; }
+$('logout').onclick = lock;
+$('login').onsubmit = (e) => { e.preventDefault(); store.set($('token').value); $('token').value = ''; unlock(); };
+store.get() ? unlock() : lock();
+
+// Live IP via the same SSE stream other services can use.
+const es = new EventSource('/events');
+es.addEventListener('ip', (e) => showIp(JSON.parse(e.data)));
+</script>
+</body>
+</html>
