@@ -95,7 +95,7 @@ main() {
       || die "Could not pull the image (see the error above). 'unauthorized' means the package is private: run 'docker login ghcr.io' or ask the owner to make it public."
     echo "WARNING: pull failed; using the image already on this machine." >&2
   fi
-  dc up -d --no-build
+  dc up -d --no-build || die "Could not start the stack (see the error above). If it says it cannot bind $bind: Docker Desktop, OrbStack and ArcBox run in a VM that does not own your LAN address. Re-run with 0.0.0.0 (every interface) or 127.0.0.1 (this machine only), after 'cd $dir && docker compose down -v'."
 
   local api_host=$bind
   [ "$api_host" != 0.0.0.0 ] || api_host=127.0.0.1
